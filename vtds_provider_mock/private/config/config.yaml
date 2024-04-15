@@ -1,3 +1,19 @@
 provider:
-  blade_interconnects: {}
-  virtual_blades: {}
+  blade_interconnects:
+    mock_interconnect:
+      network_name: mock-interconnect
+      ipv4_cidr: 10.255.0.0/16
+  virtual_blades:
+    mock_blade:
+      count: 3
+      hostnames:
+        - mock-001
+        - mock-002
+        - mock-003
+      ips:
+        - 10.255.0.1
+        - 10.255.0.2
+        - 10.255.0.3
+      interconnects:
+        mock_interconnect:
+          name: mock-interconnect
