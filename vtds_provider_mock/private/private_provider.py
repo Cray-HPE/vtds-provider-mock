@@ -27,6 +27,10 @@
 from vtds_base import (
     ContextualError,
 )
+from .api_objects import (
+    PrivateVirtualBlades,
+    PrivateBladeInterconnects
+)
 
 
 class PrivateProvider:
@@ -79,6 +83,31 @@ class PrivateProvider:
             )
         print("Deploying vtds-provider-mock")
 
+    def shutdown(self, virtual_blade_names):
+        """Shutdown operation. This will shut down (power off) the
+        specified virtual blades, or, if none are specified, all
+        virtual blades, in the provider, leaving them provisioned.
+
+        """
+        print(
+            "Shutting down nodes in vtds-provider-mock: %s" % (
+                str(virtual_blade_names)
+            )
+        )
+
+    def startup(self, virtual_blade_names):
+        """Startup operation. This will start up (power on) the
+        specified virtual blades, or, if none are specified, all
+        virtual blades, in the provider as long as they are
+        provisioned.
+
+        """
+        print(
+            "Starting up nodes in vtds-provider-mock: %s" % (
+                str(virtual_blade_names)
+            )
+        )
+
     def dismantle(self):
         """Dismantle operation. This will de-provision all virtual
         blades in the provider.
@@ -111,3 +140,17 @@ class PrivateProvider:
                 "cannot deploy an unprepared provider, call prepare() first"
             )
         print("Removing vtds-provider-mock")
+
+    def get_virtual_blades(self):
+        """Return a the VirtualBlades object containing all of the
+        available non-pure-base-class Virtual Blades.
+
+        """
+        return PrivateVirtualBlades(self.config)
+
+    def get_blade_interconnects(self):
+        """Return a BladeInterconnects object containing all the
+        available non-pure-base-class Blade Interconnects.
+
+        """
+        return PrivateBladeInterconnects(self.config)

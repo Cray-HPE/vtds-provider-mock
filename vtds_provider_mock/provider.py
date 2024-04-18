@@ -22,7 +22,7 @@
 # OTHER DEALINGS IN THE SOFTWARE.
 """Public API module for the mock provider layer, this gives callers
 access to the Provider API and prevents them from seeing the private
-implementation of the API.
+specific implementation of the API.
 
 """
 
@@ -50,12 +50,15 @@ class LayerAPI:
                 "no provider configuration found in top level configuration"
             )
         self.private = PrivateProvider(stack, provider_config, build_dir)
+        self.prepared = False
+        self.deployed = False
 
     def prepare(self):
         """Prepare the provider for deployment.
 
         """
         self.private.prepare()
+        self.prepared = True
 
     def validate(self):
         """Run any configuration validation that may be appropriate
@@ -70,6 +73,23 @@ class LayerAPI:
 
         """
         self.private.deploy()
+
+    def shutdown(self, virtual_blade_names=None):
+        """Shutdown operation. This will shut down (power off) the
+        specified virtual blades, or, if none are specified, all
+        virtual blades, in the provider, leaving them provisioned.
+
+        """
+        self.private.shutdown(virtual_blade_names)
+
+    def startup(self, virtual_blade_names=None):
+        """Startup operation. This will start up (power on) the
+        specified virtual blades, or, if none are specified, all
+        virtual blades, in the provider as long as they are
+        provisioned.
+
+        """
+        self.private.startup(virtual_blade_names)
 
     def dismantle(self):
         """Dismantle operation. This will de-provision all virtual
@@ -91,3 +111,17 @@ class LayerAPI:
 
         """
         self.private.remove()
+
+    def get_virtual_blades(self):
+        """Return a the VirtualBlades object containing all of the
+        available non-pure-base-class Virtual Blades.
+
+        """
+        return self.private.get_virtual_blades()
+
+    def get_blade_interconnects(self):
+        """Return a BladeInterconnects object containing all the
+        available non-pure-base-class Blade Interconnects.
+
+        """
+        return self.private.get_blade_interconnects()
