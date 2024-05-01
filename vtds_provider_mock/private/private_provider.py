@@ -29,8 +29,10 @@ from vtds_base import (
 )
 from .api_objects import (
     PrivateVirtualBlades,
-    PrivateBladeInterconnects
+    PrivateBladeInterconnects,
+    PrivateSecrets
 )
+from .secret_manager import SecretManager
 
 
 class PrivateProvider:
@@ -48,6 +50,7 @@ class PrivateProvider:
         self.stack = stack
         self.build_dir = build_dir
         self.prepared = False
+        self.secret_manager = SecretManager(self.config)
 
     def prepare(self):
         """Prepare operation. This drives creation of the provider
@@ -146,7 +149,7 @@ class PrivateProvider:
         available non-pure-base-class Virtual Blades.
 
         """
-        return PrivateVirtualBlades(self.config)
+        return PrivateVirtualBlades(self.config, self.build_dir)
 
     def get_blade_interconnects(self):
         """Return a BladeInterconnects object containing all the
@@ -154,3 +157,10 @@ class PrivateProvider:
 
         """
         return PrivateBladeInterconnects(self.config)
+
+    def get_secrets(self):
+        """Return a Secrets API object that provides access to all
+        available secrets.
+
+        """
+        return PrivateSecrets(self.secret_manager)

@@ -17,3 +17,7 @@ provider:
       interconnects:
         mock_interconnect:
           name: mock-interconnect
+      ssh_key_secret: mock-ssh-secret
+  secrets:
+    mock_ssh_secret:
+      name: mock-ssh-secret

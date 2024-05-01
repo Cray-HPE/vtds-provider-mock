@@ -23,6 +23,7 @@
 """Private implementations of API objects.
 
 """
+from os.path import join as path_join
 from contextlib import contextmanager
 
 from vtds_base import (
@@ -31,7 +32,8 @@ from vtds_base import (
 from ..api_objects import (
     VirtualBlades,
     BladeInterconnects,
-    BladeConnection
+    BladeConnection,
+    Secrets
 )
 
 
@@ -44,11 +46,12 @@ class PrivateVirtualBlades(VirtualBlades):
     0 and less that the number of blade instances in the class.
 
     """
-    def __init__(self, config):
+    def __init__(self, config, build_dir):
         """Constructor
 
         """
         self.config = config
+        self.build_dir = build_dir
 
     def __get_blade(self, blade_type):
         """Class private: get the blade configuration for the named
@@ -133,6 +136,37 @@ class PrivateVirtualBlades(VirtualBlades):
         self.__check_instance(blade_type, instance)
         blade = self.__get_blade(blade_type)
         return blade.get('ips', [])[instance]
+
+    def blade_ssh_key_secret(self, blade_type):
+        """Return the name of the secret containing the SSH key pair
+        used to to authenticate with blades of the specified blade
+        type.
+
+        """
+        blade = self.__get_blade(blade_type)
+        secret_name = blade.get('ssh_key_secret', None)
+        if secret_name is None:
+            raise ContextualError(
+                "provider config error: no 'ssh_key_secret' "
+                "found in blade type '%s'" % blade_type
+            )
+        return secret_name
+
+    def blade_ssh_key_paths(self, blade_type):
+        """Return a tuple of paths to files containing the public and
+        private SSH keys used to to authenticate with blades of the
+        specified blade type. The tuple is in the form '(public_path,
+        private_path)' The value of 'private_path' is suitable for use
+        with the '-i' option of 'ssh'. Before returning this call will
+        verify that both files can be opened for reading and will fail
+        with a ContextualError if either cannot.
+
+        """
+        secret_name = self.blade_ssh_key_secret(blade_type)
+        ssh_dir = path_join(self.build_dir, 'blade_ssh_keys', secret_name)
+        private_path = path_join(ssh_dir, "id_rsa")
+        public_path = path_join(ssh_dir, "id_rsa.pub")
+        return (public_path, private_path)
 
     @contextmanager
     def connect_blade(self, remote_port, blade_type, instance):
@@ -317,3 +351,36 @@ class PrivateBladeConnection(BladeConnection):
 
         """
         return self.loc_port
+
+
+class PrivateSecrets(Secrets):
+    """Provider Layers Secrets API object. Provides ways to populate
+    and retrieve secrets through the Provider layer. Secrets are
+    created by the provider layer by declaring them in the Provider
+    configuration for your vTDS system, and should be known by their
+    names as filled out in various places and verious layers in your
+    vTDS system. For example the SSH key pair used to talk to a
+    particular set of Virtual Blades through a blade connection is
+    stored in a secret configured in the Provider layer and the name
+    of that secret can be obtained from a VirtualBlades API object
+    using the blade_ssh_key_secret() method.
+
+    """
+    def __init__(self, secret_manager):
+        """Construtor
+
+        """
+        self.secret_manager = secret_manager
+
+    def store(self, name, value):
+        """Store a value (string) in the named secret.
+
+        """
+        self.secret_manager.store(name, value)
+
+    def read(self, name):
+        """Read the value (string) stored in a named secret. If no
+        value is present, return None.
+
+        """
+        return self.secret_manager.read(name)

@@ -72,6 +72,26 @@ class VirtualBlades(metaclass=ABCMeta):
         """
 
     @abstractmethod
+    def blade_ssh_key_secret(self, blade_type):
+        """Return the name of the secret containing the SSH key pair
+        used to to authenticate with blades of the specified blade
+        type.
+
+        """
+
+    @abstractmethod
+    def blade_ssh_key_paths(self, blade_type):
+        """Return a tuple of paths to files containing the public and
+        private SSH keys used to to authenticate with blades of the
+        specified blade type. The tuple is in the form '(public_path,
+        private_path)' The value of 'private_path' is suitable for use
+        with the '-i' option of 'ssh'. Before returning this call will
+        verify that both files can be opened for reading and will fail
+        with a ContextualError if either cannot.
+
+        """
+
+    @abstractmethod
     @contextmanager
     def connect_blade(self, remote_port, blade_type, instance):
         """Establish an external connection to the specified remote
@@ -146,5 +166,32 @@ class BladeConnection(metaclass=ABCMeta):
     def local_port(self):
         """Return the TCP port number on the locally reachable IP
         address of the connection to the Virtual Blade.
+
+        """
+
+
+class Secrets:
+    """Provider Layers Secrets API object. Provides ways to populate
+    and retrieve secrets through the Provider layer. Secrets are
+    created by the provider layer by declaring them in the Provider
+    configuration for your vTDS system, and should be known by their
+    names as filled out in various places and verious layers in your
+    vTDS system. For example the SSH key pair used to talk to a
+    particular set of Virtual Blades through a blade connection is
+    stored in a secret configured in the Provider layer and the name
+    of that secret can be obtained from a VirtualBlades API object
+    using the blade_ssh_key_secret() method.
+
+    """
+    @abstractmethod
+    def store(self, name, value):
+        """Store a value (string) in the named secret.
+
+        """
+
+    @abstractmethod
+    def read(self, name):
+        """Read the value (string) stored in a named secret. If no
+        value is present, return None.
 
         """
