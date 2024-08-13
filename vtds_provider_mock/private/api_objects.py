@@ -23,22 +23,25 @@
 """Private implementations of API objects.
 
 """
-from os.path import join as path_join
-from contextlib import contextmanager
-
 from vtds_base import (
-    ContextualError
+    ContextualError,
+    log_paths,
+    info_msg,
+    render_command_string
 )
-from ..api_objects import (
-    VirtualBlades,
-    BladeInterconnects,
-    BladeConnection,
-    Secrets
+from vtds_base.layers.provider import (
+    VirtualBladesBase,
+    BladeInterconnectsBase,
+    BladeConnectionBase,
+    BladeConnectionSetBase,
+    BladeSSHConnectionBase,
+    BladeSSHConnectionSetBase,
+    SecretsBase
 )
 
 
 # pylint: disable=invalid-name
-class PrivateVirtualBlades(VirtualBlades):
+class VirtualBlades(VirtualBladesBase):
     """The external representation of a class of Virtual Blades and
     the public operations that can be performed on blades in that
     class. Virtual Blade operations refer to individual blades by
@@ -46,206 +49,94 @@ class PrivateVirtualBlades(VirtualBlades):
     0 and less that the number of blade instances in the class.
 
     """
-    def __init__(self, config, build_dir):
+    def __init__(self, common):
         """Constructor
 
         """
-        self.config = config
-        self.build_dir = build_dir
+        self.__doc__ = VirtualBladesBase.__doc__
+        self.common = common
 
-    def __get_blade(self, blade_type):
-        """Class private: get the blade configuration for the named
-        blade type and return it.
+    def blade_classes(self):
+        virtual_blades = self.common.get('virtual_blades', {})
+        return [name for name, _ in virtual_blades.items()]
 
-        """
-        blade = (
-            self.config.get('provider', {})
-            .get('virtual_blades', {})
-            .get(blade_type, None)
+    def blade_count(self, blade_class):
+        return self.common.blade_count(blade_class)
+
+    def blade_interconnects(self, blade_class):
+        return self.common.blade_interconnects(blade_class)
+
+    def blade_hostname(self, blade_class, instance):
+        return self.common.blade_hostname(blade_class, instance)
+
+    def blade_ip(self, blade_class, instance, interconnect):
+        return self.common.blade_ip(blade_class, instance, interconnect)
+
+    def blade_ssh_key_secret(self, blade_class):
+        return self.common.blade_ssh_key_secret(blade_class)
+
+    def blade_ssh_key_paths(self, blade_class):
+        secret_name = self.common.blade_ssh_key_secret(blade_class)
+        return self.common.ssh_key_paths(secret_name)
+
+    def connect_blade(self, blade_class, instance, remote_port):
+        return BladeConnection(
+            self.common, blade_class, instance, remote_port
         )
-        if blade is None:
-            raise ContextualError(
-                "unknown blade type '%s' specified"
-            )
-        return blade
 
-    def __check_instance(self, blade_type, instance):
-        """class private: Ensure that the specified instance number
-        for a given blade type (blades) is legal.
-
-        """
-        if not isinstance(instance, int):
-            raise ContextualError(
-                "Virtual Blade instance number must be integer not '%s'" %
-                type(instance)
-            )
-        blade = self.__get_blade(blade_type)
-        count = int(blade.get('count'), 0)
-        if instance < 0 or instance >= count:
-            raise ContextualError(
-                "instance number %d out of range for Virtual Blade "
-                "type '%s' which has a count of %d" %
-                (instance, blade_type, count)
-            )
-
-    def blade_types(self):
-        """Get a list of virtual blade types that are not pure base
-        classes by name.
-
-        """
-        virtual_blades = self.config.get('virtual_blades', {})
-        return [
-            name for name in virtual_blades
-            if not virtual_blades[name].get('pure_base_class', False)
-        ]
-
-    def blade_count(self, blade_type):
-        """Get the number of Virtual Blade instances of the specified
-        type.
-
-        """
-        blade = self.__get_blade(blade_type)
-        return int(blade.get('count', 0))
-
-    def blade_interconnects(self, blade_type):
-        """Return the list of Blade Interconnects by name connected to
-        the specified type of Virtual Blade.
-
-        """
-        blade = self.__get_blade(blade_type)
-        return [
-            interconnect['name']
-            for _, interconnect in blade.get('interconnects', {}).items()
-        ]
-
-    def blade_hostname(self, blade_type, instance):
-        """Get the hostname of a given instance of the specified type
-        of Virtual Blade.
-
-        """
-        self.__check_instance(blade_type, instance)
-        blade = self.__get_blade(blade_type)
-        return blade.get('hostnames', [])[instance]
-
-    def blade_ip(self, blade_type, instance, interconnect):
-        """Return the IP address (string) on the named Blade
-        Interconnect of a specified instance of the named Virtual
-        Blade type.
-
-        """
-        self.__check_instance(blade_type, instance)
-        blade = self.__get_blade(blade_type)
-        return blade.get('ips', [])[instance]
-
-    def blade_ssh_key_secret(self, blade_type):
-        """Return the name of the secret containing the SSH key pair
-        used to to authenticate with blades of the specified blade
-        type.
-
-        """
-        blade = self.__get_blade(blade_type)
-        secret_name = blade.get('ssh_key_secret', None)
-        if secret_name is None:
-            raise ContextualError(
-                "provider config error: no 'ssh_key_secret' "
-                "found in blade type '%s'" % blade_type
-            )
-        return secret_name
-
-    def blade_ssh_key_paths(self, blade_type):
-        """Return a tuple of paths to files containing the public and
-        private SSH keys used to to authenticate with blades of the
-        specified blade type. The tuple is in the form '(public_path,
-        private_path)' The value of 'private_path' is suitable for use
-        with the '-i' option of 'ssh'. Before returning this call will
-        verify that both files can be opened for reading and will fail
-        with a ContextualError if either cannot.
-
-        """
-        secret_name = self.blade_ssh_key_secret(blade_type)
-        ssh_dir = path_join(self.build_dir, 'blade_ssh_keys', secret_name)
-        private_path = path_join(ssh_dir, "id_rsa")
-        public_path = path_join(ssh_dir, "id_rsa.pub")
-        return (public_path, private_path)
-
-    @contextmanager
-    def connect_blade(self, remote_port, blade_type, instance):
-        """Establish an external connection to the specified remote
-        port on the specified instance of the named Virtual Blade
-        type. Return a context manager (suitable for use in a 'with'
-        clause) yielding a BladeConnection object for the
-        connection. Upon leaving the 'with' context, the connection in
-        the BladeConnection is closed.
-
-        """
-        hostname = self.blade_hostname(blade_type, instance)
-        connection = PrivateBladeConnection(
-            hostname, remote_port, blade_type
-        )
-        try:
-            yield connection
-        finally:
-            # This is a layer private operation not really class
-            # private. Treat this reference as friendly.
-            connection._disconnect()  # pylint: disable=protected-access
-
-    @contextmanager
-    def connect_blades(self, remote_port, blade_types=None):
-        """Establish external connections to the specified remote port
-        on all the Virtual Blade instances on all the Virtual Blade
-        types listed by name in 'blade_types'. If 'blade_types' is not
-        provided or None, all available blade types are used. Return a
-        context manager (suitable for use in a 'with' clause) yielding
-        the list of APIBladeConnection objects representing the
-        connections. Upon leaving the 'with' context, all the
-        connections in the resulting list are closed.
-
-        """
-        virtual_blades = (
-            self.config.get('provider', {}).get('virtual_blades', {})
-        )
-        blade_types = (
-            blade_types if blade_types is not None else
-            [
-                name for name in virtual_blades
-                if not virtual_blades[name].get('pure_base_class', False)
-            ]
+    def connect_blades(self, remote_port, blade_classes=None):
+        blade_classes = (
+            self.blade_classes() if blade_classes is None else blade_classes
         )
         connections = [
-            PrivateBladeConnection(
-                self.blade_hostname(blade_type, instance), remote_port,
-                blade_type
+            BladeConnection(
+                self.common, blade_class, instance, remote_port
             )
-            for blade_type in blade_types
-            for instance in range(0, self.blade_count(blade_type))
+            for blade_class in blade_classes
+            for instance in range(0, self.blade_count(blade_class))
         ]
-        try:
-            yield connections
-        finally:
-            for connection in connections:
-                # This is a layer private operation not really class
-                # private. Treat this reference as friendly.
-                connection._disconnect()  # pylint: disable=protected-access
+        return BladeConnectionSet(self.common, connections)
+
+    def ssh_connect_blade(self, blade_class, instance, remote_port=22):
+        return BladeSSHConnection(
+            self.common, blade_class, instance,
+            self.blade_ssh_key_paths(blade_class)[1],
+            remote_port
+        )
+
+    def ssh_connect_blades(self, blade_classes=None, remote_port=22):
+        blade_classes = (
+            self.blade_classes() if blade_classes is None else blade_classes
+        )
+        connections = [
+            BladeSSHConnection(
+                self.common, blade_class, instance,
+                self.blade_ssh_key_paths(blade_class)[1],
+                remote_port
+            )
+            for blade_class in blade_classes
+            for instance in range(0, self.blade_count(blade_class))
+        ]
+        return BladeSSHConnectionSet(self.common, connections)
 
 
-# pylint: disable=invalid-name
-class PrivateBladeInterconnects(BladeInterconnects):
+class BladeInterconnects(BladeInterconnectsBase):
     """The external representation of the set of Blade Interconnects
     and public operations that can be performed on the interconnects.
 
     """
-    def __init__(self, config):
+    def __init__(self, common):
         """Constructor
 
         """
-        self.config = config
+        self.common = common
 
     def __interconnects_by_name(self):
         """Return a dictionary of non-pure-base-class interconnects
         indexed by 'network_name'
 
         """
-        blade_interconnects = self.config.get("blade_interconnects", {})
+        blade_interconnects = self.common.get("blade_interconnects", {})
         try:
             return {
                 interconnect['network_name']: interconnect
@@ -253,13 +144,16 @@ class PrivateBladeInterconnects(BladeInterconnects):
                 if not interconnect.get('pure_base_class', False)
             }
         except KeyError as err:
-            # Unfortunately, because of the comprehension above, I don't
-            # know which network had the problem, but I can at least report
-            # which key was bad...
+            # Since we are going to error out anyway, build a list of
+            # interconnects without network names so we can give a
+            # more useful error message.
+            missing_names = [
+                key for key, interconnect in blade_interconnects.items()
+                if 'network_name' not in interconnect
+            ]
             raise ContextualError(
                 "provider config error: 'network_name' not specified in "
-                "one of the interconnects configured under "
-                "'provider.blade_interconnects'"
+                "the following blade interconnects: %s" % str(missing_names)
             ) from err
 
     def interconnect_names(self):
@@ -273,12 +167,10 @@ class PrivateBladeInterconnects(BladeInterconnects):
         network on the named interconnect.
 
         """
-        blade_interconnects = (
-            self.config.get("provider", {}).get("blade_interconnects", {})
-        )
+        blade_interconnects = self.__interconnects_by_name()
         if interconnect_name not in blade_interconnects:
             raise ContextualError(
-                "requestiong ipv4_cidr of unknown blade interconnect '%s'" %
+                "requesting ipv4_cidr of unknown blade interconnect '%s'" %
                 interconnect_name
             )
         interconnect = blade_interconnects.get(interconnect_name, {})
@@ -290,70 +182,323 @@ class PrivateBladeInterconnects(BladeInterconnects):
         return interconnect['ipv4_cidr']
 
 
-# pylint: disable=invalid-name
-class PrivateBladeConnection(BladeConnection):
+class BladeConnection(BladeConnectionBase):
     """A class containing the relevant information needed to use
     external connections to ports on a specific Virtual Blade.
 
     """
-    def __init__(self, hostname, remote_port, blade_type):
+    def __init__(self, common, blade_class, instance, remote_port):
         """Constructor
 
         """
-        self.hostname = hostname
-        self.blade_type = blade_type
-        self.remote_port = remote_port
-        self.local_ip = "127.0.0.1"
-        self.loc_port = None
-        self._connect()
-
-    def _connect(self):
-        """Layer private operation: establish the connection and learn
-        the local IP and port of the connection. This is really not done
-        in the mock layer, there is no actual connection set up at all.
-
-        """
-        print(
-            "Connecting to blade '%s'[%s] port %d" % (
-                self.hostname, self.blade_type, self.remote_port
-            )
+        self.common = common
+        self.b_class = blade_class
+        self.instance = instance
+        self.rem_port = remote_port
+        self.hostname = self.common.blade_hostname(
+            blade_class, instance
         )
+        self.loc_ip = "127.0.0.1"
         self.loc_port = 12345
 
-    def _disconnect(self):
-        """Layer private operation: drop the connection.
-        """
-        self.loc_port = None
+    def __enter__(self):
+        return self
 
-    def blade_type(self):
-        """Return the name of the Virtual Blade type of the connected
-        Virtual Blade.
+    def __exit__(
+            self,
+            exception_type=None,
+            exception_value=None,
+            traceback=None
+    ):
+        # Nothing really to do here...
+        pass
 
-        """
-        return self.blade_type
+    def blade_class(self):
+        return self.b_class
 
     def blade_hostname(self):
-        """Return the hostname of the connected Virtual Blade.
-
-        """
         return self.hostname
 
-    def local_ip(self):
-        """Return the locally reachable IP address of the connection
-        to the Virtual Blade.
+    def remote_port(self):
+        return self.rem_port
 
-        """
-        return self.local_ip
+    def local_ip(self):
+        return self.loc_ip
 
     def local_port(self):
-        """Return the TCP port number on the locally reachable IP
-        address of the connection to the Virtual Blade.
-
-        """
         return self.loc_port
 
 
-class PrivateSecrets(Secrets):
+class BladeConnectionSet(BladeConnectionSetBase):
+    """A class that contains multiple active BladeConnections to
+    facilitate operations on multiple simultaneous blades. This class
+    is just a wrapper for a list of BladeContainers and should be
+    obtained using the VirtualBlades.connect_blades() method not
+    directly.
+
+    """
+    def __init__(self, common, blade_connections):
+        """Constructor
+
+        """
+        self.common = common
+        self.blade_connections = blade_connections
+
+    def __enter__(self):
+        return self
+
+    def __exit__(
+            self,
+            exception_type=None,
+            exception_value=None,
+            traceback=None
+    ):
+        for connection in self.blade_connections:
+            connection.__exit__(exception_type, exception_value, traceback)
+
+    def list_connections(self, blade_class=None):
+        """List the connections in the BladeConnectionSet filtered by
+        'blade_class' if that is present. Otherwise imply list all of
+        the connections.
+
+        """
+        return [
+            blade_connection for blade_connection in self.blade_connections
+            if blade_class is None or
+            blade_connection.blade_class() == blade_class
+        ]
+
+    def get_connection(self, hostname):
+        """Return the connection corresponding to the specified
+        VirtualBlade hostname ('hostname') or None if the hostname is
+        not found.
+
+        """
+        for blade_connection in self.blade_connections:
+            if blade_connection.blade_hostname() == hostname:
+                return blade_connection
+        return None
+
+
+# The following is shared by BladeSSHConnection and
+# BladeSSHConnectionSet. This should be treaded as private to
+# this file. It is pulled out of both classes for easy sharing.
+def wait_for_popen(subprocess, cmd, logpaths, timeout=None, **kwargs):
+    """Mock up of a Wait for a Popen() object to reach completion and
+    return the exit value. It really just returns.
+
+    """
+    info_msg(
+        "waiting for popen: "
+        "subproc='%s', cmd='%s', logpaths='%s', timeout='%s', kwargs='%s'" % (
+            str(subprocess), str(cmd), str(logpaths), str(timeout), str(kwargs)
+        )
+    )
+    return 0
+
+
+class BladeSSHConnection(BladeSSHConnectionBase, BladeConnection):
+    """Specifically a connection to the SSH server on a blade (remote
+    port 22 unless otherwise specified) with methods to copy files to
+    and from the blade using SCP and to run commands on the blade
+    using SSH.
+
+    """
+    # pylint: disable=unused-argument
+    def __init__(
+        self,
+        common, blade_class, instance,  private_key_path, remote_port=22,
+        **kwargs
+    ):
+        BladeConnection.__init__(
+            self,
+            common, blade_class, instance, remote_port
+        )
+        self.private_key_path = private_key_path
+
+    def __enter__(self):
+        return self
+
+    def __exit__(
+            self,
+            exception_type=None,
+            exception_value=None,
+            traceback=None
+    ):
+        BladeConnection.__exit__(
+            self, exception_type, exception_value, traceback
+        )
+
+    def _render_cmd(self, cmd):
+        """Layer private: render the specified command string with
+        Jinja to fill in the BladeSSHConnection specific data in a
+        templated command.
+
+        """
+        jinja_values = {
+            'blade_class': self.b_class,
+            'instance': self.instance,
+            'blade_hostname': self.hostname,
+            'remote_port': self.rem_port,
+            'local_ip': self.loc_ip,
+            'local_port': self.loc_port
+        }
+        return render_command_string(cmd, jinja_values)
+
+    # pylint: disable=too-many-function-args
+    def copy_to(
+            self, source, destination,
+            recurse=False, blocking=True, logname=None, **kwargs
+    ):
+        info_msg(
+            "%scopying from '%s' to root@%s:%s "
+            "[blocking=%s, logname=%s, kwargs=%s]" % (
+                "recursively " if recurse else "",
+                source, self.hostname, destination,
+                str(blocking), str(logname), str(kwargs)
+            )
+        )
+
+    # pylint: disable=too-many-function-args
+    def copy_from(
+        self, source, destination,
+            recurse=False, blocking=True, logname=None, **kwargs
+    ):
+        info_msg(
+            "%scopying from root@%s:%s to '%s' "
+            "[blocking=%s, logname=%s, kwargs=%s]" % (
+                "recursively " if recurse else "",
+                self.hostname, source, destination,
+                str(blocking), str(logname), str(kwargs)
+            )
+        )
+
+    def run_command(self, cmd, blocking=True, logfiles=None, **kwargs):
+        cmd = self._render_cmd(cmd)
+        info_msg("running '%s' on '%s'" % (cmd, self.hostname))
+
+
+class BladeSSHConnectionSet(BladeSSHConnectionSetBase, BladeConnectionSet):
+    """A class to wrap multiple BladeSSHConnections and provide
+    operations that run in parallel across multiple connections.
+
+    """
+    def __init__(self, common, connections):
+        """Constructor
+        """
+        BladeConnectionSet.__init__(self, common, connections)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(
+            self,
+            exception_type=None,
+            exception_value=None,
+            traceback=None
+    ):
+        BladeConnectionSet.__exit__(
+            self, exception_type, exception_value, traceback
+        )
+
+    def copy_to(
+        self, source, destination,
+        recurse=False, logname=None, blade_class=None
+    ):
+        wait_args_list = [
+            (
+                blade_connection.copy_to(
+                    source, destination, recurse=recurse, blocking=False,
+                    logname=logname
+                ),
+                "scp %s to root@%s:%s" % (
+                    source,
+                    blade_connection.blade_hostname(),
+                    destination
+                ),
+                log_paths(
+                    self.common.build_dir(),
+                    "%s-%s" % (logname, blade_connection.blade_hostname())
+                )
+            )
+            for blade_connection in self.blade_connections
+            if blade_class is None or
+            blade_connection.blade_class() == blade_class
+        ]
+        # Go through all of the copy operations and collect (if
+        # needed) any errors that are raised by
+        # wait_for_popen(). This acts as a barrier, so when we are
+        # done, we know all of the copies have completed.
+        errors = []
+        for wait_args in wait_args_list:
+            try:
+                wait_for_popen(*wait_args)
+            # pylint: disable=broad-exception-caught
+            except Exception as err:
+                errors.append(str(err))
+        if errors:
+            raise ContextualError(
+                "errors reported while copying '%s' to '%s' on %s\n"
+                "    %s" % (
+                    source,
+                    destination,
+                    "all Virtual Blades" if blade_class is None else
+                    "Virtual Blades of class %s" % blade_class,
+                    "\n\n    ".join(errors)
+                )
+            )
+
+    def run_command(self, cmd, logname=None, blade_class=None):
+        # Okay, this is big and weird. It composes the arguments to
+        # pass to wait_for_popen() for each copy operation. Note
+        # that, normally, the 'cmd' argument in wait_for_popen() is
+        # the Popen() 'cmd' argument. Here is is simply the shell
+        # command being run under SSH. This is okay because
+        # wait_for_popen() only uses that information for error
+        # generation.
+        wait_args_list = [
+            (
+                blade_connection.run_command(
+                    cmd, False,
+                    log_paths(
+                        self.common.build_dir(),
+                        "%s-%s" % (logname, blade_connection.blade_hostname())
+                    )
+                ),
+                cmd,
+                log_paths(
+                    self.common.build_dir(),
+                    "%s-%s" % (logname, blade_connection.blade_hostname())
+                )
+            )
+            for blade_connection in self.blade_connections
+            if blade_class is None or
+            blade_connection.blade_class() == blade_class
+        ]
+        # Go through all of the sub-processes and collect (if needed)
+        # any errors that are raised by wait_for_popen(). This acts as
+        # a barrier, so when we are done, we know all of the copies
+        # have completed.
+        errors = []
+        for wait_args in wait_args_list:
+            try:
+                wait_for_popen(*wait_args)
+            # pylint: disable=broad-exception-caught
+            except Exception as err:
+                errors.append(str(err))
+        if errors:
+            raise ContextualError(
+                "errors reported running command '%s' on %s\n"
+                "    %s" % (
+                    cmd,
+                    "all Virtual Blades" if blade_class is None else
+                    "Virtual Blades of class %s" % blade_class,
+                    "\n\n    ".join(errors)
+                )
+            )
+
+
+class Secrets(SecretsBase):
     """Provider Layers Secrets API object. Provides ways to populate
     and retrieve secrets through the Provider layer. Secrets are
     created by the provider layer by declaring them in the Provider
@@ -370,17 +515,11 @@ class PrivateSecrets(Secrets):
         """Construtor
 
         """
+        self.__doc__ = SecretsBase.__doc__
         self.secret_manager = secret_manager
 
     def store(self, name, value):
-        """Store a value (string) in the named secret.
-
-        """
         self.secret_manager.store(name, value)
 
     def read(self, name):
-        """Read the value (string) stored in a named secret. If no
-        value is present, return None.
-
-        """
         return self.secret_manager.read(name)
