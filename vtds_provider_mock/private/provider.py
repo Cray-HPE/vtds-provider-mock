@@ -29,6 +29,7 @@ from vtds_base import (
 )
 from vtds_base.layers.provider import ProviderAPI
 from .api_objects import (
+    SiteConfig,
     VirtualBlades,
     BladeInterconnects,
     Secrets
@@ -59,6 +60,9 @@ class Provider(ProviderAPI):
         self.common = Common(self.config, self.build_dir)
         self.secret_manager = SecretManager(self.config)
         self.prepared = False
+
+    def consolidate(self):
+        return
 
     def prepare(self):
         print("Preparing vtds-provider-mock")
@@ -94,3 +98,6 @@ class Provider(ProviderAPI):
 
     def get_secrets(self):
         return Secrets(self.secret_manager)
+
+    def get_site_config(self):
+        return SiteConfig(self.common)
