@@ -30,6 +30,7 @@ from vtds_base import (
     render_command_string
 )
 from vtds_base.layers.provider import (
+    SiteConfigBase,
     VirtualBladesBase,
     BladeInterconnectsBase,
     BladeConnectionBase,
@@ -38,6 +39,28 @@ from vtds_base.layers.provider import (
     BladeSSHConnectionSetBase,
     SecretsBase
 )
+
+
+class SiteConfig(SiteConfigBase):
+    """Site configuration information composed by the Provider layer
+    for public use.
+
+    """
+    def __init__(self, common):
+        """Constructor
+
+        """
+        self.__doc__ = SiteConfigBase.__doc__
+        self.common = common
+
+    def system_name(self):
+        return self.common.system_name()
+
+    def site_ntp_servers(self, address_family='AF_INET'):
+        return self.common.site_ntp_servers(address_family)
+
+    def site_dns_servers(self, address_family='AF_INET'):
+        return self.common.site_dns_servers(address_family)
 
 
 # pylint: disable=invalid-name
@@ -59,6 +82,9 @@ class VirtualBlades(VirtualBladesBase):
     def blade_classes(self):
         virtual_blades = self.common.get('virtual_blades', {})
         return [name for name, _ in virtual_blades.items()]
+
+    def application_metadata(self, blade_class):
+        return self.common.blade_application_metadata(blade_class)
 
     def blade_count(self, blade_class):
         return self.common.blade_count(blade_class)
@@ -155,6 +181,21 @@ class BladeInterconnects(BladeInterconnectsBase):
                 "provider config error: 'network_name' not specified in "
                 "the following blade interconnects: %s" % str(missing_names)
             ) from err
+
+    def __named_interconnect(self, interconnect_name):
+        """Look up a specifically named interconnect and return it.
+        """
+        blade_interconnects = self.__interconnects_by_name()
+        if interconnect_name not in blade_interconnects:
+            raise ContextualError(
+                "requesting ipv4_cidr of unknown blade interconnect '%s'" %
+                interconnect_name
+            )
+        return blade_interconnects.get(interconnect_name, {})
+
+    def application_metadata(self, interconnect_name):
+        interconnect = self.__named_interconnect(interconnect_name)
+        return interconnect.get('application_metadata', {})
 
     def interconnect_names(self):
         """Get a list of blade interconnects by name
@@ -523,3 +564,6 @@ class Secrets(SecretsBase):
 
     def read(self, name):
         return self.secret_manager.read(name)
+
+    def application_metadata(self, name):
+        return self.secret_manager.application_metadata(name)
