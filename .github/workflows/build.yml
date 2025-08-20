@@ -25,6 +25,8 @@ name: Python (build and publish)
 
 on:
   push:
+    tags:
+      - v*.*.*
 
 jobs:
   build:
@@ -33,9 +35,12 @@ jobs:
       matrix:
         version: ['3.11']
     runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         fetch-depth: 0 # Also fetch git-tags
 
@@ -49,18 +54,5 @@ jobs:
         pip3 install .[build]
         python3 -m build
 
-    - name: Setup Jfrog CLI
-      uses: jfrog/setup-jfrog-cli@v4
-      env:
-        JF_URL: https://artifactory.algol60.net
-        JF_USER: ${{ secrets.ARTIFACTORY_ALGOL60_USERNAME }}
-        JF_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ALGOL60_TOKEN }}
-
-    - name: Upload to Artifactory
-      run: |
-        PROJECT_NAME=$(basename "${GITHUB_REPOSITORY}")
-        STABLE="${{ github.ref_type == 'tag' && 'simple' || 'unstable' }}"
-        jfrog rt upload --detailed-summary --fail-no-op=true "*.tar.gz" "csm-python-modules/${STABLE}/${PROJECT_NAME}/"
-        jfrog rt upload --detailed-summary --fail-no-op=true "*.whl" "csm-python-modules/${STABLE}/${PROJECT_NAME}/"
-      working-directory:
-        dist/
+    - name: Publish
+      uses: pypa/gh-action-pypi-publish@release/v1
